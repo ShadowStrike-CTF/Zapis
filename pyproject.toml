@@ -1,0 +1,31 @@
+# © 2026 ShadowStrike. All rights reserved.
+# Aut Viam Inveniam Aut Faciam
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zapis"
+version = "1.0.0"
+description = "CTF writeup templating and export tool. by ShadowStrike."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "ShadowStrike", email = "r@strategos.au"}
+]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Source" = "https://github.com/ShadowStrike-CTF/zapis"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zapis"]
