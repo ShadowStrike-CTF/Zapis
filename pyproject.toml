@@ -34,7 +34,7 @@ classifiers = [
 test = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
-zapis = "zapis.main:main"
+zapis = "zapis.cli:main"
 
 [project.urls]
 "Source" = "https://github.com/ShadowStrike-CTF/zapis"
