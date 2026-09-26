@@ -95,6 +95,25 @@ src/zapis/
 - Every source file header: `# © 2026 ShadowStrike. All rights reserved.`
 - Commit trailer: `Co-Authored-By: Digger (Claude Opus 5.5) <noreply@anthropic.com>`
 
+## PACKAGING (PyInstaller)
+Spec: zapis.spec (onefile, console=False, pathex=['src'])
+Datas: src/zapis/static/index.html → zapis/static/
+       src/zapis/templates/ → zapis/templates/ (exporters load via Path(__file__)/../../../templates)
+Static dir: main.py static_dir() returns sys._MEIPASS/zapis/static when frozen.
+Devnull guard: __main__.py redirects sys.stdout/stderr to devnull when None.
+Build: pyinstaller zapis.spec
+Output: dist/zapis (Linux ELF, ~38 MB)
+WeasyPrint: pyinstaller-hooks-contrib's hook-weasyprint collects weasyprint data files
+  (css/html5_ua.css etc.) and bundles the build host's libpango-1.0, libpangoft2-1.0,
+  libharfbuzz, libharfbuzz-subset, libgobject-2.0 and libfontconfig (+ their deps) and
+  /etc/fonts config. Cairo is not used by WeasyPrint >= 53 and is not bundled.
+  The build host MUST have the native libs installed (libpango-1.0-0, libpangoft2-1.0-0,
+  libharfbuzz0b, libharfbuzz-subset0, libgdk-pixbuf-2.0-0) or the hook bundles nothing and
+  PDF export fails. Font files themselves are not bundled — target needs system fonts.
+  Treat the exe as tied to the build host's glibc; install the same libs on targets to be safe.
+Hiddenimports: none. Probe (--collect-submodules weasyprint) showed no weasyprint misses;
+  fontTools.ttLib.* and pycparser.lextab/yacctab warnings are benign false positives.
+
 ## Testing Standard
 - All tests in `tests/`
 - pytest with `[test]` extras in pyproject.toml
