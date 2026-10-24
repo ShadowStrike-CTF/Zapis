@@ -48,6 +48,7 @@ src/zapis/
   core/
     __init__.py
     schema.py          # WriteupSchema dataclass — single source of truth for form fields
+    import_sarissa.py  # Sarissa export JSON → pre-filled writeup dicts (Phase 6)
     exporters/
       __init__.py
       markdown.py      # schema → .md string
@@ -113,6 +114,77 @@ WeasyPrint: pyinstaller-hooks-contrib's hook-weasyprint collects weasyprint data
   Treat the exe as tied to the build host's glibc; install the same libs on targets to be safe.
 Hiddenimports: none. Probe (--collect-submodules weasyprint) showed no weasyprint misses;
   fontTools.ttLib.* and pycparser.lextab/yacctab warnings are benign false positives.
+
+## Phase 6 — Sarissa Export JSON Import
+Load a Sarissa session export (Sarissa `GET /api/export`, schema v1.0) into Zapis as
+pre-filled writeups. File-based only — the user picks the `.json` file Sarissa saved.
+
+### Endpoint: `POST /api/import/sarissa`
+- Body: the full Sarissa export JSON object, unmodified.
+- Validation — each of these is a 422 with a string `detail`:
+  - malformed JSON, or a body that is not a JSON object
+  - `schema_version != "1.0"`
+  - `tool != "sarissa"`
+  - `challenges` missing or not a list (an empty list is valid)
+  - a `challenges[]` entry that is not an object
+- Lenient fields — never an error:
+  - `name` / `notes` missing (or not a string) on a challenge → `""`
+  - `session` missing, null or not an object → `ctf_name` is `""`. No 409: Zapis holds no
+    session state of its own; the 409 NoActiveSession convention is Sarissa's, and Sarissa
+    already refuses to export without an active session.
+- Returns: a JSON list of pre-filled writeup dicts, one per challenge, in file order:
+  `{"challenge_name": str, "ctf_name": str, "category": "", "difficulty": 0,
+    "tools_used": [], "approach": str, "flag": ""}`
+- `challenges` empty → a list with one blank entry (`ctf_name` still filled from the session).
+- Unknown extra keys anywhere in the export are ignored.
+
+### Field mapping
+| Sarissa export        | Zapis writeup    |
+|-----------------------|------------------|
+| `challenges[].name`   | `challenge_name` |
+| `session.name`        | `ctf_name` (same value on every entry) |
+| `challenges[].notes`  | `approach` (pre-fill — user edits before export) |
+| —                     | `category`, `difficulty`, `tools_used`, `flag` left blank |
+
+`difficulty: 0` and `category: ""` are deliberately invalid for `WriteupSchema` — the user
+must choose them before export. The import never builds a `WriteupSchema`.
+
+### Core module: `src/zapis/core/import_sarissa.py`
+- Pure function `parse_sarissa_export(data: dict) -> list[dict]` — no FastAPI import.
+- Raises `SarissaImportError(ValueError)` on invalid input; the route maps it to 422.
+- `routes.py` only calls it — no validation or mapping in the web layer (INV-1, INV-4).
+
+### Frontend (`src/zapis/static/index.html`)
+- "Import from Sarissa" button in the header → hidden `<input type="file" accept=".json">`.
+- File read client-side (`file.text()`), raw text POSTed to `/api/import/sarissa`; the
+  server is the single validator (malformed JSON → 422 → shown inline).
+- On success: fills `challenge_name`, `ctf_name`, `approach`; clears `tools_used`, `flag`;
+  blanks the category and difficulty selects. `notes`, `author`, `date` are left as-is.
+- 2+ entries → a "Challenge" picker appears beside the button; choosing one refills the form
+  from that entry. Export buttons export whatever the form currently shows.
+- All user data via `textContent` / `value` — never `innerHTML`. Errors shown inline in the
+  header status (no browser dialogs). No green.
+- Client-side required check also covers category and difficulty (an imported form must
+  have them chosen before export).
+
+### Phase 6 INVs
+- INV-P6-1: Zapis NEVER calls Sarissa's API directly — import is file-based only
+- INV-P6-2: Port 7331 NEVER hardcoded in Zapis
+- INV-P6-3: No `results` key expected in Sarissa JSON (ignored if present)
+- INV-P6-4: Manual form entry unchanged — import is additive
+- INV-P6-5: No new runtime dependencies — stdlib `json` only
+- INV-P6-6: Existing export pipeline (MD/HTML/PDF) unchanged
+
+### Tests (`tests/test_import_sarissa.py`, TestClient)
+- `test_import_sarissa_valid_single_challenge`
+- `test_import_sarissa_valid_multi_challenge`
+- `test_import_sarissa_empty_challenges`
+- `test_import_sarissa_missing_notes`
+- `test_import_sarissa_wrong_schema_version` → 422
+- `test_import_sarissa_wrong_tool` → 422
+- `test_import_sarissa_malformed_json` → 422
+
+Minimum 7 new tests; the existing 32 stay green (39 total).
 
 ## Testing Standard
 - All tests in `tests/`

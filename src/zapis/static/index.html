@@ -31,6 +31,10 @@
   }
   header h1 { margin: 0; font-size: 24px; color: var(--brick); letter-spacing: 0.04em; }
   header span { color: var(--muted); font-size: 13px; }
+  header .import { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  header .import select { width: auto; max-width: 260px; }
+  #import_status { font-size: 13px; color: var(--muted); }
+  #import_status.error { color: #e6674f; }
   main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
   form {
     background: var(--surface);
@@ -81,6 +85,12 @@
 <header>
   <h1>ZAPIS</h1>
   <span>CTF writeup templating and export · by ShadowStrike</span>
+  <div class="import">
+    <span id="import_status" role="status" aria-live="polite"></span>
+    <select id="import_pick" aria-label="Challenge" hidden></select>
+    <button type="button" id="import_btn">Import from Sarissa</button>
+    <input type="file" id="import_file" accept=".json" hidden>
+  </div>
 </header>
 <main>
   <form id="writeup" novalidate>
@@ -190,9 +200,12 @@
 
   function missing(data) {
     var labels = { challenge_name: "Challenge name", ctf_name: "CTF name",
+                   category: "Category", difficulty: "Difficulty",
                    approach: "Approach", flag: "Flag" };
-    return Object.keys(labels).filter(function (k) { return !String(data[k]).trim(); })
-      .map(function (k) { return labels[k]; });
+    return Object.keys(labels).filter(function (k) {
+      var v = data[k];
+      return typeof v === "number" ? isNaN(v) : !String(v).trim();
+    }).map(function (k) { return labels[k]; });
   }
 
   function filenameFrom(resp, fmt) {
@@ -246,6 +259,83 @@
 
   buttons.forEach(function (b) {
     b.addEventListener("click", function () { exportAs(b.getAttribute("data-fmt")); });
+  });
+
+  // Sarissa import — file-based only; the server validates and maps (core/import_sarissa.py).
+  var importBtn = document.getElementById("import_btn");
+  var importFile = document.getElementById("import_file");
+  var importPick = document.getElementById("import_pick");
+  var importStatus = document.getElementById("import_status");
+  var imported = [];
+
+  function setImportStatus(text, isError) {
+    importStatus.textContent = text;
+    importStatus.className = isError ? "error" : "";
+  }
+
+  function fill(entry) {
+    document.getElementById("challenge_name").value = entry.challenge_name;
+    document.getElementById("ctf_name").value = entry.ctf_name;
+    document.getElementById("approach").value = entry.approach;
+    document.getElementById("tools_used").value = entry.tools_used.join("\n");
+    document.getElementById("flag").value = entry.flag;
+    // Blank category/difficulty from the import — leaves both selects unchosen.
+    document.getElementById("category").value = entry.category;
+    document.getElementById("difficulty").value = entry.difficulty ? String(entry.difficulty) : "";
+    setStatus("", false);
+  }
+
+  function showPicker(entries) {
+    while (importPick.firstChild) { importPick.removeChild(importPick.firstChild); }
+    entries.forEach(function (e, i) {
+      var opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = (i + 1) + ". " + (e.challenge_name || "(unnamed)");
+      importPick.appendChild(opt);
+    });
+    importPick.hidden = entries.length < 2;
+  }
+
+  importBtn.addEventListener("click", function () { importFile.click(); });
+
+  importPick.addEventListener("change", function () {
+    var entry = imported[parseInt(importPick.value, 10)];
+    if (entry) { fill(entry); }
+  });
+
+  importFile.addEventListener("change", function () {
+    var file = importFile.files[0];
+    importFile.value = "";
+    if (!file) { return; }
+    importBtn.disabled = true;
+    setImportStatus("Importing…", false);
+    file.text()
+      .then(function (text) {
+        return fetch("/api/import/sarissa", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: text
+        });
+      })
+      .then(function (resp) {
+        if (!resp.ok) {
+          return resp.json()
+            .then(function (j) {
+              return typeof j.detail === "string" ? j.detail : "File is not valid JSON.";
+            }, function () { return "server error (" + resp.status + ")"; })
+            .then(function (msg) { throw new Error("Import failed: " + msg); });
+        }
+        return resp.json();
+      })
+      .then(function (entries) {
+        imported = entries;
+        showPicker(entries);
+        fill(entries[0]);
+        setImportStatus("Imported " + entries.length + " challenge" +
+                        (entries.length === 1 ? "" : "s") + " from " + file.name, false);
+      })
+      .catch(function (err) { setImportStatus(err.message || "Import failed.", true); })
+      .then(function () { importBtn.disabled = false; });
   });
 })();
 </script>
