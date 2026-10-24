@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zapis"
-version = "1.1.0"
+version = "1.1.1"
 description = "CTF writeup templating and export tool. by ShadowStrike."
 readme = "README.md"
 license = {text = "MIT"}
