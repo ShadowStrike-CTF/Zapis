@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
 from zapis.core.export import export, filename_for, media_type
+from zapis.core.import_sarissa import SarissaImportError, parse_sarissa_export
 from zapis.core.schema import CATEGORIES, WriteupSchema
 
 router = APIRouter()
@@ -52,3 +53,11 @@ def export_writeup(
         media_type=media_type(fmt),
         headers={"Content-Disposition": f'attachment; filename="{filename_for(schema, fmt)}"'},
     )
+
+
+@router.post("/api/import/sarissa")
+def import_sarissa(body: dict[str, Any] = Body(...)) -> list[dict[str, Any]]:
+    try:
+        return parse_sarissa_export(body)
+    except SarissaImportError as exc:
+        raise HTTPException(422, str(exc)) from exc
