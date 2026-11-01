@@ -45,8 +45,10 @@ src/zapis/
   __init__.py
   __main__.py          # thin launcher — calls main.main()
   main.py              # FastAPI app, PORT=7334, uvicorn thread, browser open
+  cli.py               # `zapis` launches the web UI, `zapis create` exports a writeup
   core/
     __init__.py
+    export.py          # format dispatch shared by web + CLI: schema → (bytes, media type, filename)
     schema.py          # WriteupSchema dataclass — single source of truth for form fields
     import_sarissa.py  # Sarissa export JSON → pre-filled writeup dicts (Phase 6)
     exporters/
