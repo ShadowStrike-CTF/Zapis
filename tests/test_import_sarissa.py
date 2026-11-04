@@ -83,10 +83,15 @@ def test_import_sarissa_missing_notes(client):
     assert r.json() == [blank("No Notes", "", ""), blank("", "", "No name.")]
 
 
-def test_import_sarissa_wrong_schema_version(client):
-    r = client.post(URL, json=sarissa_export(schema_version="2.0"))
-    assert r.status_code == 422
-    assert "schema_version" in r.json()["detail"]
+def test_import_sarissa_unknown_schema_version_warns(client, caplog):
+    # F01: an unknown schema_version is logged as a warning and imported, not rejected.
+    with caplog.at_level("WARNING", logger="zapis.import_sarissa"):
+        r = client.post(URL, json=sarissa_export(schema_version="2.0"))
+    assert r.status_code == 200
+    assert r.json() == [
+        blank("Lost USB", "DFIR-Cup-2026", "Carved the FAT partition with <photorec>.")
+    ]
+    assert "2.0" in caplog.text
 
 
 def test_import_sarissa_wrong_tool(client):

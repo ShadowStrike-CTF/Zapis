@@ -1,11 +1,16 @@
 # © 2026 ShadowStrike. All rights reserved.
 # Aut Viam Inveniam Aut Faciam
-"""Sarissa export JSON (schema v1.0) → pre-filled writeup dicts. File-based only — never calls Sarissa."""
+"""Sarissa export JSON (schema v1.0 / v1.3) → pre-filled writeup dicts. File-based only — never calls Sarissa."""
 from __future__ import annotations
+
+import logging
 from typing import Any
 
-SCHEMA_VERSION = "1.0"
-TOOL = "sarissa"
+log = logging.getLogger("zapis.import_sarissa")
+
+# Sarissa export schema versions Zapis knows. Any other version is imported with a warning, not rejected.
+SCHEMA_VERSIONS = ("1.0", "1.3")
+TOOL = "sarissa"  # compared case-insensitively — Sarissa emits "Sarissa"
 
 
 class SarissaImportError(ValueError):
@@ -32,12 +37,14 @@ def _entry(challenge_name: str, ctf_name: str, approach: str) -> dict[str, Any]:
 def parse_sarissa_export(data: dict) -> list[dict]:
     if not isinstance(data, dict):
         raise SarissaImportError("Sarissa export must be a JSON object")
-    if data.get("schema_version") != SCHEMA_VERSION:
-        raise SarissaImportError(
-            f"schema_version must be {SCHEMA_VERSION!r}, got {data.get('schema_version')!r}"
+    if data.get("schema_version") not in SCHEMA_VERSIONS:
+        log.warning(
+            "Unknown Sarissa schema_version %r (known: %s) — importing anyway",
+            data.get("schema_version"), ", ".join(SCHEMA_VERSIONS),
         )
-    if data.get("tool") != TOOL:
-        raise SarissaImportError(f"tool must be {TOOL!r}, got {data.get('tool')!r}")
+    tool = data.get("tool")
+    if not isinstance(tool, str) or tool.lower() != TOOL:
+        raise SarissaImportError(f"tool must be {TOOL!r} (any case), got {tool!r}")
     challenges = data.get("challenges")
     if not isinstance(challenges, list):
         raise SarissaImportError("challenges must be a list")
