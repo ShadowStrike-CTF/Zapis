@@ -9,6 +9,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 PORT = 7334
 HOST = "127.0.0.1"
@@ -26,6 +27,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Zapis", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.port = PORT
     app.include_router(router)
+    # F02: outermost layer (added last = checked first). Loopback Host headers only.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     return app
 
 

@@ -100,3 +100,8 @@ def test_unknown_format_and_no_docs(client, payload):
     assert client.post("/api/export/docx", json=payload).status_code == 422
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
+
+
+def test_trusted_host_rejects_external(client):
+    response = client.get("/", headers={"Host": "evil.local"})
+    assert response.status_code == 400
