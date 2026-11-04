@@ -118,17 +118,21 @@ Hiddenimports: none. Probe (--collect-submodules weasyprint) showed no weasyprin
   fontTools.ttLib.* and pycparser.lextab/yacctab warnings are benign false positives.
 
 ## Phase 6 — Sarissa Export JSON Import
-Load a Sarissa session export (Sarissa `GET /api/export`, schema v1.0) into Zapis as
+Load a Sarissa session export (Sarissa `GET /api/export`, schema v1.0 or v1.3) into Zapis as
 pre-filled writeups. File-based only — the user picks the `.json` file Sarissa saved.
 
 ### Endpoint: `POST /api/import/sarissa`
 - Body: the full Sarissa export JSON object, unmodified.
 - Validation — each of these is a 422 with a string `detail`:
   - malformed JSON, or a body that is not a JSON object
-  - `schema_version != "1.0"`
-  - `tool != "sarissa"`
+  - `tool` missing, not a string, or not `"sarissa"` compared case-insensitively
+    (`tool.lower() == "sarissa"` — Sarissa emits `"Sarissa"`)
   - `challenges` missing or not a list (an empty list is valid)
   - a `challenges[]` entry that is not an object
+- Schema version (F01, Zapis 1.3.0) — never an error:
+  - Known versions: `"1.0"` and `"1.3"` (`SCHEMA_VERSIONS` in `core/import_sarissa.py`) → imported silently.
+    Sarissa emits `"1.3"` since its Phase 13 (v1.3 adds `challenge_time_seconds`; additive, Zapis ignores it).
+  - Any other value (incl. missing) → `logging` warning on `zapis.import_sarissa`, then imported anyway.
 - Lenient fields — never an error:
   - `name` / `notes` missing (or not a string) on a challenge → `""`
   - `session` missing, null or not an object → `ctf_name` is `""`. No 409: Zapis holds no
@@ -182,11 +186,16 @@ must choose them before export. The import never builds a `WriteupSchema`.
 - `test_import_sarissa_valid_multi_challenge`
 - `test_import_sarissa_empty_challenges`
 - `test_import_sarissa_missing_notes`
-- `test_import_sarissa_wrong_schema_version` → 422
+- `test_import_sarissa_unknown_schema_version_warns` → 200 + warning (was `_wrong_schema_version` → 422 before F01)
 - `test_import_sarissa_wrong_tool` → 422
 - `test_import_sarissa_malformed_json` → 422
 
 Minimum 7 new tests; the existing 32 stay green (39 total).
+
+F01 contract tests (`tests/test_sarissa_contract.py`, 39 → 56): `SARISSA_1_3_EXPORT` fixture mirrors
+Sarissa's `build_export()` (schema "1.3", tool "Sarissa"). `test_accepts_sarissa_1_3_export` plus
+known/unknown version, tool-case and still-rejected-tool cases. When Sarissa bumps its export schema,
+add the version to `SCHEMA_VERSIONS` and the fixture together.
 
 ## Testing Standard
 - All tests in `tests/`
