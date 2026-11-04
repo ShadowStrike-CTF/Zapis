@@ -2,12 +2,12 @@
 
 ## Identity
 **Tool:** Zapis
-**One-liner:** CTF writeup templating and export tool. MIT licensed community tool. by ShadowStrike.
+**One-liner:** CTF writeup templating and export tool. Proprietary. by ShadowStrike.
 **PyPI slug:** zapis
 **GitHub:** ShadowStrike-CTF/zapis
 **Port:** 7334
 **Colour:** #a93226 (Macedonian brick red)
-**Licence:** MIT
+**Licence:** Proprietary (all rights reserved)
 **Copyright:** © 2026 ShadowStrike. All rights reserved.
 
 ## What Zapis Does
@@ -94,7 +94,7 @@ src/zapis/
   - CI: `apt install` them before pytest (e.g. `libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libcairo2`)
   - PyInstaller (later phase): the GTK/Pango runtime must be bundled for Windows builds
 - src/ layout — all code under src/zapis/
-- MIT licence — © 2026 ShadowStrike. All rights reserved.
+- Proprietary licence — © 2026 ShadowStrike. All rights reserved.
 - Every source file header: `# © 2026 ShadowStrike. All rights reserved.`
 - Commit trailer: `Co-Authored-By: Digger (Claude Opus 5.5) <noreply@anthropic.com>`
 
@@ -205,3 +205,12 @@ Minimum 7 new tests; the existing 32 stay green (39 total).
 - Never assume `pip install weasyprint` alone gives working PDF export — Pango/Cairo native libs are required (CI + PyInstaller)
 - Never use `git add -A` — path-scoped commits only
 - Never open PRs for Phase 1 — commit directly to main
+
+## F04 — licence: MIT → Proprietary
+- LICENSE: all rights reserved, no reproduction/distribution without ShadowStrike's written permission
+- pyproject: `license = {text = "Proprietary"}`, classifier `License :: Other/Proprietary License`
+- Every package .py carries `# © 2026 ShadowStrike. All rights reserved.` in its header
+  (vendored `_vendor/megdan_schema/` excluded — hash-pinned, never edited)
+- README footer: `© 2026 ShadowStrike. All rights reserved. Aut Viam Inveniam Aut Faciam`
+- MIT releases already on PyPI stay MIT; the proprietary licence applies from this version on
+- Version 1.1.2 → 1.2.0. No tag pushed
