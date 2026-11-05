@@ -1,0 +1,58 @@
+{# © 2026 ShadowStrike. All rights reserved. — Aut Viam Inveniam Aut Faciam
+   One writeup's header…sections, shared by writeup.html and bundle.html. Expects `w` (a WriteupSchema).
+   User text is autoescaped — never |safe, never Markup() (INV-P2-3). -#}
+{% macro blocks(text) -%}
+{% for seg in split_fences(text) -%}
+{% if seg.kind == "code" %}<pre><code{% if seg.lang %} class="{{ seg.lang }}"{% endif %}>{{ seg.body }}</code></pre>{% else %}<p class="prose">{{ seg.body }}</p>{% endif %}
+{%- if not loop.last %}
+    {% endif %}
+{%- endfor %}
+{%- endmacro -%}
+<header>
+    <p class="eyebrow">CTF Writeup</p>
+    <h1>{{ w.challenge_name }}</h1>
+    <p class="ctf">{{ w.ctf_name }}</p>
+  </header>
+
+  <table class="meta">
+    <tr><th>CTF</th><td>{{ w.ctf_name }}</td></tr>
+    <tr><th>Category</th><td><span class="badge">{{ w.category }}</span></td></tr>
+    <tr>
+      <th>Difficulty</th>
+      <td>{% for i in range(1, 4) %}<span class="pip{% if i <= w.difficulty %} on{% endif %}"></span>{% endfor %}<span class="diff-label">{{ w.difficulty }}/3</span></td>
+    </tr>
+    <tr><th>Date</th><td>{{ w.date }}</td></tr>
+    <tr><th>Author</th><td>{{ w.author }}</td></tr>
+{%- if w.time_spent_minutes %}
+    <tr><th>Time spent</th><td>{{ w.time_spent_minutes }} min</td></tr>
+{%- endif %}
+  </table>
+
+  <section>
+    <h2>Tools Used</h2>
+    {% if w.tools_used %}
+    <ul class="tools">
+      {% for tool in w.tools_used %}<li>{{ tool }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">None recorded.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Approach</h2>
+    {{ blocks(w.approach) }}
+  </section>
+
+  <section>
+    <h2>Flag</h2>
+    <p class="flag">{{ w.flag }}</p>
+  </section>
+
+  {% if w.notes %}
+  <section>
+    <h2>Notes</h2>
+    {{ blocks(w.notes) }}
+  </section>
+  {% endif %}

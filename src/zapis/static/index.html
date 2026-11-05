@@ -31,10 +31,17 @@
   }
   header h1 { margin: 0; font-size: 24px; color: var(--brick); letter-spacing: 0.04em; }
   header span { color: var(--muted); font-size: 13px; }
-  header .import { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  header { flex-wrap: wrap; }
+  header .import { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
   header .import select { width: auto; max-width: 260px; }
-  #import_status { font-size: 13px; color: var(--muted); }
+  header .group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  header button { padding: 7px 12px; font-size: 13px; }
+  button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  button.ghost:hover { border-color: var(--brick); }
+  #import_status { font-size: 13px; color: var(--muted); flex-basis: 100%; text-align: right; min-height: 1.2em; }
   #import_status.error { color: #e6674f; }
+  #remove_confirm { font-size: 13px; color: var(--text); background: var(--brick-soft); border: 1px solid var(--brick); border-radius: 6px; padding: 4px 8px; }
+  [hidden] { display: none !important; }
   main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
   form {
     background: var(--surface);
@@ -86,10 +93,38 @@
   <h1>ZAPIS</h1>
   <span>CTF writeup templating and export · by ShadowStrike</span>
   <div class="import">
+    <div class="group">
+      <select id="import_pick" aria-label="Challenge" hidden></select>
+      <button type="button" class="ghost" id="new_btn">New challenge</button>
+      <button type="button" class="ghost" id="remove_btn">Remove challenge</button>
+      <span id="remove_confirm" hidden>
+        <span id="remove_text"></span>
+        <button type="button" id="remove_yes">Remove</button>
+        <button type="button" class="ghost" id="remove_no">Cancel</button>
+      </span>
+    </div>
+    <div class="group">
+      <button type="button" id="import_btn">Import from Sarissa</button>
+      <input type="file" id="import_file" accept=".json" hidden>
+      <button type="button" class="ghost" id="draft_open_btn">Open draft</button>
+      <input type="file" id="draft_file" accept=".json" hidden>
+      <button type="button" class="ghost" id="draft_save_btn">Save draft</button>
+    </div>
+    <div class="group" id="bundle_controls" hidden>
+      <select id="bundle_fmt" aria-label="Export all format">
+        <option value="md">Markdown</option>
+        <option value="html">HTML</option>
+        <option value="pdf">PDF</option>
+        <option value="zip">Zip</option>
+      </select>
+      <select id="bundle_inner" aria-label="Files inside the zip" hidden>
+        <option value="md">.md files</option>
+        <option value="html">.html files</option>
+        <option value="pdf">.pdf files</option>
+      </select>
+      <button type="button" id="bundle_btn">Export all</button>
+    </div>
     <span id="import_status" role="status" aria-live="polite"></span>
-    <select id="import_pick" aria-label="Challenge" hidden></select>
-    <button type="button" id="import_btn">Import from Sarissa</button>
-    <input type="file" id="import_file" accept=".json" hidden>
   </div>
 </header>
 <main>
@@ -139,6 +174,11 @@
       <label for="date">Date</label>
       <input id="date" name="date" type="date">
     </div>
+    <div>
+      <label for="time_spent_minutes">Time spent (min)</label>
+      <input id="time_spent_minutes" name="time_spent_minutes" type="number" min="0" step="1" inputmode="numeric">
+      <div class="hint">Optional. Empty or 0 is left out of the writeup.</div>
+    </div>
     <div class="full actions">
       <button type="button" data-fmt="md">Download MD</button>
       <button type="button" data-fmt="html">Download HTML</button>
@@ -151,26 +191,38 @@
 <script>
 (function () {
   "use strict";
+  // All user data goes through textContent / value only. No browser dialogs.
   var form = document.getElementById("writeup");
   var statusEl = document.getElementById("status");
   var buttons = form.querySelectorAll("button[data-fmt]");
+  var FIELDS = ["challenge_name", "ctf_name", "category", "difficulty", "tools_used", "approach",
+                "flag", "notes", "author", "date", "time_spent_minutes"];
+
+  function el(id) { return document.getElementById(id); }
+  function value(id) { return el(id).value; }
 
   function setStatus(text, isError) {
     statusEl.textContent = text;
     statusEl.className = isError ? "error" : "";
   }
 
-  function value(id) { return document.getElementById(id).value; }
+  var importStatus = el("import_status");
+  function setImportStatus(text, isError) {
+    importStatus.textContent = text;
+    importStatus.className = isError ? "error" : "";
+  }
 
-  var today = new Date();
   var pad = function (n) { return (n < 10 ? "0" : "") + n; };
-  document.getElementById("date").value =
-    today.getFullYear() + "-" + pad(today.getMonth() + 1) + "-" + pad(today.getDate());
+  function todayISO() {
+    var d = new Date();
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  }
+  el("date").value = todayISO();
 
   fetch("/api/categories")
     .then(function (r) { return r.json(); })
     .then(function (cats) {
-      var sel = document.getElementById("category");
+      var sel = el("category");
       cats.forEach(function (c) {
         var opt = document.createElement("option");
         opt.value = c;
@@ -180,22 +232,173 @@
     })
     .catch(function () { setStatus("Could not load categories.", true); });
 
-  function payload() {
-    var tools = value("tools_used").split(/[\n,]/)
+  function parseTools(text) {
+    return text.split(/[\n,]/)
       .map(function (t) { return t.trim(); })
       .filter(function (t) { return t.length > 0; });
+  }
+
+  function parseMinutes(text) {
+    if (!String(text).trim()) { return 0; }
+    var n = Number(text);
+    return Number.isInteger(n) ? n : NaN;
+  }
+
+  // --- Working set ---------------------------------------------------------
+  // In-memory list of entries (the server stores nothing — INV-P2-1). The form always shows
+  // workingSet[activeIndex]; commit() writes the form back before anything reads the set.
+  var workingSet = [null];  // null = "whatever the form shows" until the first commit
+  var activeIndex = 0;
+
+  function readForm() {
+    var minutes = parseMinutes(value("time_spent_minutes"));
     return {
-      challenge_name: value("challenge_name").trim(),
-      ctf_name: value("ctf_name").trim(),
+      challenge_name: value("challenge_name"),
+      ctf_name: value("ctf_name"),
       category: value("category"),
-      difficulty: parseInt(value("difficulty"), 10),
-      tools_used: tools,
+      difficulty: parseInt(value("difficulty"), 10) || 0,
+      tools_used: parseTools(value("tools_used")),
       approach: value("approach"),
-      flag: value("flag").trim(),
+      flag: value("flag"),
       notes: value("notes"),
-      author: value("author").trim() || "ShadowStrike",
-      date: value("date")
+      author: value("author"),
+      date: value("date"),
+      time_spent_minutes: isNaN(minutes) ? 0 : minutes
     };
+  }
+
+  function fillForm(entry) {
+    el("challenge_name").value = entry.challenge_name || "";
+    el("ctf_name").value = entry.ctf_name || "";
+    // Blank category/difficulty (import, new entry) leaves both selects unchosen.
+    el("category").value = entry.category || "";
+    el("difficulty").value = entry.difficulty ? String(entry.difficulty) : "";
+    el("tools_used").value = (entry.tools_used || []).join("\n");
+    el("approach").value = entry.approach || "";
+    el("flag").value = entry.flag || "";
+    el("notes").value = entry.notes || "";
+    el("author").value = entry.author || "";
+    el("date").value = entry.date || "";
+    el("time_spent_minutes").value = entry.time_spent_minutes ? String(entry.time_spent_minutes) : "";
+    setStatus("", false);
+  }
+
+  function commit() { workingSet[activeIndex] = readForm(); }
+
+  function blankEntry() {
+    var cur = workingSet[activeIndex] || readForm();
+    return {
+      challenge_name: "", ctf_name: cur.ctf_name, category: "", difficulty: 0, tools_used: [],
+      approach: "", flag: "", notes: "", author: cur.author || "ShadowStrike",
+      date: cur.date || todayISO(), time_spent_minutes: 0
+    };
+  }
+
+  function isEmpty(entry) {
+    return !entry || !(entry.challenge_name.trim() || entry.approach.trim() || entry.flag.trim() ||
+                       entry.notes.trim() || entry.tools_used.length);
+  }
+
+  var picker = el("import_pick");
+  function label(entry, i) {
+    var name = entry && entry.challenge_name.trim();
+    return (i + 1) + ". " + (name || "(unnamed)");
+  }
+
+  function refresh() {
+    while (picker.firstChild) { picker.removeChild(picker.firstChild); }
+    workingSet.forEach(function (e, i) {
+      var opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = label(e, i);
+      picker.appendChild(opt);
+    });
+    picker.value = String(activeIndex);
+    picker.hidden = workingSet.length < 2;
+    el("bundle_controls").hidden = workingSet.length < 2;
+    hideRemoveConfirm();
+  }
+
+  // Switching writes the current form back first — edits are never thrown away.
+  function switchTo(i) {
+    commit();
+    activeIndex = i;
+    fillForm(workingSet[i]);
+    refresh();
+  }
+
+  function replaceSet(entries, index) {
+    workingSet = entries.length ? entries : [blankEntry()];
+    activeIndex = index >= 0 && index < workingSet.length ? index : 0;
+    fillForm(workingSet[activeIndex]);
+    refresh();
+  }
+
+  picker.addEventListener("change", function () { switchTo(parseInt(picker.value, 10)); });
+
+  el("challenge_name").addEventListener("input", function () {
+    var opt = picker.options[activeIndex];
+    if (opt) { opt.textContent = label({ challenge_name: value("challenge_name") }, activeIndex); }
+  });
+
+  el("new_btn").addEventListener("click", function () {
+    commit();
+    workingSet.push(blankEntry());
+    activeIndex = workingSet.length - 1;
+    fillForm(workingSet[activeIndex]);
+    refresh();
+    setImportStatus("Added challenge " + workingSet.length + ".", false);
+    el("challenge_name").focus();
+  });
+
+  // Remove asks inline — no browser dialog.
+  var removeConfirm = el("remove_confirm");
+  function hideRemoveConfirm() {
+    removeConfirm.hidden = true;
+    el("remove_btn").hidden = false;
+  }
+  el("remove_btn").addEventListener("click", function () {
+    var name = value("challenge_name").trim();
+    el("remove_text").textContent = "Remove " + (name ? "“" + name + "”" : "this challenge") + "?";
+    el("remove_btn").hidden = true;
+    removeConfirm.hidden = false;
+    el("remove_no").focus();
+  });
+  el("remove_no").addEventListener("click", hideRemoveConfirm);
+  el("remove_yes").addEventListener("click", function () {
+    commit();
+    var fresh = blankEntry();
+    workingSet.splice(activeIndex, 1);
+    if (!workingSet.length) { workingSet.push(fresh); }
+    activeIndex = Math.min(activeIndex, workingSet.length - 1);
+    fillForm(workingSet[activeIndex]);
+    refresh();
+    setImportStatus("Challenge removed.", false);
+  });
+
+  // --- Export payloads ---------------------------------------------------------
+  function toPayload(entry) {
+    return {
+      challenge_name: entry.challenge_name.trim(),
+      ctf_name: entry.ctf_name.trim(),
+      category: entry.category,
+      difficulty: entry.difficulty,
+      tools_used: entry.tools_used,
+      approach: entry.approach,
+      flag: entry.flag.trim(),
+      notes: entry.notes,
+      author: entry.author.trim() || "ShadowStrike",
+      date: entry.date,
+      time_spent_minutes: entry.time_spent_minutes
+    };
+  }
+
+  function payload() {
+    var data = toPayload(readForm());
+    var minutes = parseMinutes(value("time_spent_minutes"));
+    data.time_spent_minutes = minutes;  // NaN / negative → server 422 with a clear message
+    if (!data.difficulty) { data.difficulty = NaN; }
+    return data;
   }
 
   function missing(data) {
@@ -208,10 +411,10 @@
     }).map(function (k) { return labels[k]; });
   }
 
-  function filenameFrom(resp, fmt) {
+  function filenameFrom(resp, fallback) {
     var cd = resp.headers.get("Content-Disposition") || "";
     var m = /filename="([^"]+)"/.exec(cd);
-    return m ? m[1] : "writeup." + fmt;
+    return m ? m[1] : fallback;
   }
 
   function errorText(resp) {
@@ -219,7 +422,36 @@
       .then(function (j) {
         return typeof j.detail === "string" ? j.detail : "Invalid input (" + resp.status + ")";
       })
-      .catch(function () { return "Export failed (" + resp.status + ")"; });
+      .catch(function () { return "Request failed (" + resp.status + ")"; });
+  }
+
+  function postJSON(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: typeof body === "string" ? body : JSON.stringify(body)
+    }).then(function (resp) {
+      if (!resp.ok) {
+        return errorText(resp).then(function (msg) { throw new Error(msg); });
+      }
+      return resp;
+    });
+  }
+
+  // Saves a response as a file download; resolves to the filename.
+  function download(resp, fallback) {
+    var name = filenameFrom(resp, fallback);
+    return resp.blob().then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      return name;
+    });
   }
 
   function exportAs(fmt) {
@@ -229,30 +461,15 @@
       setStatus("Required: " + gaps.join(", "), true);
       return;
     }
+    if (isNaN(data.time_spent_minutes) || data.time_spent_minutes < 0) {
+      setStatus("Time spent must be a whole number of minutes, 0 or more.", true);
+      return;
+    }
     buttons.forEach(function (b) { b.disabled = true; });
     setStatus("Exporting " + fmt.toUpperCase() + "…", false);
-    fetch("/api/export/" + fmt, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data)
-    })
-      .then(function (resp) {
-        if (!resp.ok) {
-          return errorText(resp).then(function (msg) { throw new Error(msg); });
-        }
-        var name = filenameFrom(resp, fmt);
-        return resp.blob().then(function (blob) {
-          var url = URL.createObjectURL(blob);
-          var a = document.createElement("a");
-          a.href = url;
-          a.download = name;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-          setStatus("Saved " + name, false);
-        });
-      })
+    postJSON("/api/export/" + fmt, data)
+      .then(function (resp) { return download(resp, "writeup." + fmt); })
+      .then(function (name) { setStatus("Saved " + name, false); })
       .catch(function (err) { setStatus(err.message || "Export failed.", true); })
       .then(function () { buttons.forEach(function (b) { b.disabled = false; }); });
   }
@@ -261,82 +478,80 @@
     b.addEventListener("click", function () { exportAs(b.getAttribute("data-fmt")); });
   });
 
-  // Sarissa import — file-based only; the server validates and maps (core/import_sarissa.py).
-  var importBtn = document.getElementById("import_btn");
-  var importFile = document.getElementById("import_file");
-  var importPick = document.getElementById("import_pick");
-  var importStatus = document.getElementById("import_status");
-  var imported = [];
+  // --- Export all (bundle) ---------------------------------------------------------
+  var bundleFmt = el("bundle_fmt");
+  var bundleInner = el("bundle_inner");
+  var bundleBtn = el("bundle_btn");
+  bundleFmt.addEventListener("change", function () { bundleInner.hidden = bundleFmt.value !== "zip"; });
 
-  function setImportStatus(text, isError) {
-    importStatus.textContent = text;
-    importStatus.className = isError ? "error" : "";
-  }
+  bundleBtn.addEventListener("click", function () {
+    commit();
+    var fmt = bundleFmt.value;
+    bundleBtn.disabled = true;
+    setImportStatus("Exporting " + workingSet.length + " writeups…", false);
+    // The server validates every entry and names each one that fails (422).
+    postJSON("/api/export/bundle/" + fmt, { writeups: workingSet.map(toPayload), inner: bundleInner.value })
+      .then(function (resp) { return download(resp, "writeups." + fmt); })
+      .then(function (name) { setImportStatus("Saved " + name, false); })
+      .catch(function (err) { setImportStatus("Export all failed: " + (err.message || "error"), true); })
+      .then(function () { bundleBtn.disabled = false; });
+  });
 
-  function fill(entry) {
-    document.getElementById("challenge_name").value = entry.challenge_name;
-    document.getElementById("ctf_name").value = entry.ctf_name;
-    document.getElementById("approach").value = entry.approach;
-    document.getElementById("tools_used").value = entry.tools_used.join("\n");
-    document.getElementById("flag").value = entry.flag;
-    // Blank category/difficulty from the import — leaves both selects unchosen.
-    document.getElementById("category").value = entry.category;
-    document.getElementById("difficulty").value = entry.difficulty ? String(entry.difficulty) : "";
-    setStatus("", false);
-  }
+  // --- Drafts — user-owned files, the server keeps nothing -------------------------
+  var draftSaveBtn = el("draft_save_btn");
+  draftSaveBtn.addEventListener("click", function () {
+    commit();
+    draftSaveBtn.disabled = true;
+    postJSON("/api/draft/save", { writeups: workingSet, active_index: activeIndex })
+      .then(function (resp) { return download(resp, "draft.zapis.json"); })
+      .then(function (name) { setImportStatus("Saved draft " + name, false); })
+      .catch(function (err) { setImportStatus("Save draft failed: " + (err.message || "error"), true); })
+      .then(function () { draftSaveBtn.disabled = false; });
+  });
 
-  function showPicker(entries) {
-    while (importPick.firstChild) { importPick.removeChild(importPick.firstChild); }
-    entries.forEach(function (e, i) {
-      var opt = document.createElement("option");
-      opt.value = String(i);
-      opt.textContent = (i + 1) + ". " + (e.challenge_name || "(unnamed)");
-      importPick.appendChild(opt);
+  // Reads a picked file and POSTs its raw text — the server is the single validator.
+  function pickFile(input, btn, url, verb, onData) {
+    btn.addEventListener("click", function () { input.click(); });
+    input.addEventListener("change", function () {
+      var file = input.files[0];
+      input.value = "";
+      if (!file) { return; }
+      btn.disabled = true;
+      setImportStatus(verb + "…", false);
+      file.text()
+        .then(function (text) { return postJSON(url, text); })
+        .then(function (resp) { return resp.json(); })
+        .then(function (data) { onData(data, file.name); })
+        .catch(function (err) { setImportStatus(verb + " failed: " + (err.message || "error"), true); })
+        .then(function () { btn.disabled = false; });
     });
-    importPick.hidden = entries.length < 2;
   }
 
-  importBtn.addEventListener("click", function () { importFile.click(); });
+  pickFile(el("draft_file"), el("draft_open_btn"), "/api/draft/load", "Opening draft",
+    function (data, fileName) {
+      replaceSet(data.writeups, data.active_index);
+      setImportStatus("Opened " + data.writeups.length + " writeup" +
+                      (data.writeups.length === 1 ? "" : "s") + " from " + fileName, false);
+    });
 
-  importPick.addEventListener("change", function () {
-    var entry = imported[parseInt(importPick.value, 10)];
-    if (entry) { fill(entry); }
-  });
+  // Sarissa import — file-based only; the server validates and maps (core/import_sarissa.py).
+  // Additive: imported challenges join the working set (replacing it only if it is still blank).
+  pickFile(el("import_file"), el("import_btn"), "/api/import/sarissa", "Importing",
+    function (entries, fileName) {
+      commit();
+      var keep = workingSet.length === 1 && isEmpty(workingSet[0]) ? [] : workingSet;
+      var base = workingSet[activeIndex];
+      var added = entries.map(function (e) {
+        var entry = { notes: "", author: base.author || "ShadowStrike", date: base.date || todayISO() };
+        FIELDS.forEach(function (f) { if (f in e) { entry[f] = e[f]; } });
+        return entry;
+      });
+      replaceSet(keep.concat(added), keep.length);
+      setImportStatus("Imported " + entries.length + " challenge" +
+                      (entries.length === 1 ? "" : "s") + " from " + fileName, false);
+    });
 
-  importFile.addEventListener("change", function () {
-    var file = importFile.files[0];
-    importFile.value = "";
-    if (!file) { return; }
-    importBtn.disabled = true;
-    setImportStatus("Importing…", false);
-    file.text()
-      .then(function (text) {
-        return fetch("/api/import/sarissa", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: text
-        });
-      })
-      .then(function (resp) {
-        if (!resp.ok) {
-          return resp.json()
-            .then(function (j) {
-              return typeof j.detail === "string" ? j.detail : "File is not valid JSON.";
-            }, function () { return "server error (" + resp.status + ")"; })
-            .then(function (msg) { throw new Error("Import failed: " + msg); });
-        }
-        return resp.json();
-      })
-      .then(function (entries) {
-        imported = entries;
-        showPicker(entries);
-        fill(entries[0]);
-        setImportStatus("Imported " + entries.length + " challenge" +
-                        (entries.length === 1 ? "" : "s") + " from " + file.name, false);
-      })
-      .catch(function (err) { setImportStatus(err.message || "Import failed.", true); })
-      .then(function () { importBtn.disabled = false; });
-  });
+  refresh();
 })();
 </script>
 </body>

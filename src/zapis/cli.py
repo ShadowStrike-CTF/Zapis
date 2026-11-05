@@ -1,13 +1,28 @@
 # © 2026 ShadowStrike. All rights reserved.
 # Aut Viam Inveniam Aut Faciam
-"""Zapis CLI — `zapis` launches the web UI, `zapis create` exports a writeup."""
+"""Zapis CLI — `zapis` launches the web UI, `zapis create` exports a writeup,
+`zapis bundle` exports every writeup in a draft file."""
 from __future__ import annotations
 import argparse
+import json
 import sys
 from pathlib import Path
 
+from zapis.core import build_schema
+from zapis.core.bundle import FORMATS as BUNDLE_FORMATS, INNER_FORMATS, BundleError, bundle_filename, export_bundle
+from zapis.core.draft import DraftError, parse_draft
 from zapis.core.export import FORMATS, export, filename_for
-from zapis.core.schema import CATEGORIES, WriteupSchema
+from zapis.core.schema import CATEGORIES
+
+
+def _minutes(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"must be a whole number of minutes, got {text!r}") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, got {value}")
+    return value
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,9 +42,19 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--notes", default="")
     create.add_argument("--author", default="ShadowStrike")
     create.add_argument("--date", help="ISO date (default: today)")
+    create.add_argument("--time-spent", type=_minutes, default=0, metavar="MINUTES",
+                        dest="time_spent_minutes", help="time spent in minutes (optional)")
     create.add_argument("--format", default="md", choices=FORMATS, dest="fmt")
     create.add_argument("-o", "--output", type=Path,
                         help="output path (default: ./<challenge-slug>.<format>)")
+
+    bundle = sub.add_parser("bundle", help="export every writeup in a draft file as one bundle")
+    bundle.add_argument("draft", type=Path, metavar="DRAFT.zapis.json")
+    bundle.add_argument("--format", required=True, choices=BUNDLE_FORMATS, dest="fmt")
+    bundle.add_argument("--inner", default="md", choices=INNER_FORMATS,
+                        help="file format inside a zip bundle (default: md)")
+    bundle.add_argument("-o", "--output", type=Path,
+                        help="output path (default: ./<ctf-slug>-writeups.<format>)")
     return parser
 
 
@@ -44,11 +69,12 @@ def _create(args: argparse.Namespace) -> int:
         flag=args.flag,
         notes=args.notes,
         author=args.author,
+        time_spent_minutes=args.time_spent_minutes,
     )
     if args.date:
         fields["date"] = args.date
     try:
-        schema = WriteupSchema(**fields)
+        schema = build_schema(fields)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -58,10 +84,36 @@ def _create(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bundle(args: argparse.Namespace) -> int:
+    try:
+        data = json.loads(args.draft.read_text(encoding="utf-8"))
+        entries, _ = parse_draft(data)
+        content = export_bundle(entries, args.fmt, args.inner)
+    except OSError as exc:
+        print(f"error: cannot read {args.draft}: {exc.strerror or exc}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as exc:
+        print(f"error: {args.draft} is not valid JSON: {exc}", file=sys.stderr)
+        return 1
+    except BundleError as exc:
+        for message in exc.messages:
+            print(f"error: {message}", file=sys.stderr)
+        return 1
+    except DraftError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    out = args.output or Path(bundle_filename(entries, args.fmt))
+    out.write_bytes(content)
+    print(out)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "create":
         return _create(args)
+    if args.command == "bundle":
+        return _bundle(args)
     from zapis.main import main as launch
     launch()
     return 0

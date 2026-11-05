@@ -2,10 +2,10 @@
 # Aut Viam Inveniam Aut Faciam
 """Format dispatch shared by the web and CLI layers — schema → (bytes, media type, filename)."""
 from __future__ import annotations
-import re
 from zapis.core.exporters.html import export_html
 from zapis.core.exporters.markdown import export_markdown
 from zapis.core.schema import WriteupSchema
+from zapis.core.text import slugify
 
 FORMATS = ("md", "html", "pdf")
 
@@ -39,5 +39,4 @@ def media_type(fmt: str) -> str:
 
 def filename_for(schema: WriteupSchema, fmt: str) -> str:
     _check(fmt)
-    slug = re.sub(r"[^a-z0-9]+", "-", schema.challenge_name.lower()).strip("-")
-    return f"{slug or 'writeup'}.{fmt}"
+    return f"{slugify(schema.challenge_name, 'writeup')}.{fmt}"
