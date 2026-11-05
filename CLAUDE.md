@@ -51,6 +51,9 @@ src/zapis/
     export.py          # format dispatch shared by web + CLI: schema → (bytes, media type, filename)
     schema.py          # WriteupSchema dataclass — single source of truth for form fields
     import_sarissa.py  # Sarissa export JSON → pre-filled writeup dicts (Phase 6)
+    text.py            # fence parser (split_fences) + Markdown escape helpers (Phase 2)
+    draft.py           # draft file build/parse + normalise_entry (Phase 2)
+    bundle.py          # multi-writeup bundle export: md / html / pdf / zip (Phase 2)
     exporters/
       __init__.py
       markdown.py      # schema → .md string
@@ -60,8 +63,13 @@ src/zapis/
     __init__.py
     routes.py          # FastAPI route handlers — call core exporters, never export directly
   templates/
-    writeup.html       # Jinja2 template for HTML export
-    writeup.md         # Jinja2 template for Markdown export
+    writeup.html       # Jinja2 template for HTML export (wrapper around the partials)
+    writeup.md         # Jinja2 template for Markdown export (wrapper around the partial)
+    _writeup_style.html  # shared <style> block for writeup.html + bundle.html (Phase 2)
+    _writeup_body.html # one writeup's header…sections — shared by single + bundle (Phase 2)
+    _writeup_body.md   # one writeup's body — shared by single + bundle (Phase 2)
+    bundle.html        # multi-writeup bundle: title page, contents, one writeup per page (Phase 2)
+    bundle.md          # multi-writeup bundle in Markdown (Phase 2)
   static/
     index.html         # single-page form UI
 ```
@@ -69,7 +77,8 @@ src/zapis/
 ## Writeup Schema (core fields)
 - `challenge_name` — str
 - `ctf_name` — str
-- `category` — str (e.g. Forensics, OSINT, Crypto, Pwn, Web, Misc)
+- `category` — str, one of Forensics, OSINT, Crypto, Pwn, Web, Reverse, Misc
+  (source of truth: `CATEGORIES` in `src/zapis/core/schema.py` — this list is a copy)
 - `difficulty` — int 1–3
 - `tools_used` — list[str]
 - `approach` — str (free text — solution walkthrough)
@@ -77,6 +86,7 @@ src/zapis/
 - `notes` — str (optional)
 - `author` — str (defaults to "ShadowStrike")
 - `date` — str (ISO date, defaults to today)
+- `time_spent_minutes` — int ≥ 0 (optional, defaults to 0; 0 means "not recorded" and renders nothing)
 
 ## UI Design
 - Brick red theme: `--brick: #a93226`, dark background matching Megdan line style
@@ -131,16 +141,20 @@ pre-filled writeups. File-based only — the user picks the `.json` file Sarissa
   - a `challenges[]` entry that is not an object
 - Schema version (F01, Zapis 1.3.0) — never an error:
   - Known versions: `"1.0"` and `"1.3"` (`SCHEMA_VERSIONS` in `core/import_sarissa.py`) → imported silently.
-    Sarissa emits `"1.3"` since its Phase 13 (v1.3 adds `challenge_time_seconds`; additive, Zapis ignores it).
+    Sarissa emits `"1.3"` since its Phase 13 (v1.3 adds `challenge_time_seconds`; additive — mapped
+    to `time_spent_minutes` since Zapis Phase 2 / P2-1).
   - Any other value (incl. missing) → `logging` warning on `zapis.import_sarissa`, then imported anyway.
 - Lenient fields — never an error:
   - `name` / `notes` missing (or not a string) on a challenge → `""`
+  - `category` missing, not a string, or not in `CATEGORIES` (case-insensitive) → `""`
+  - `challenge_time_seconds` missing, not an int, or negative → `time_spent_minutes: 0`
   - `session` missing, null or not an object → `ctf_name` is `""`. No 409: Zapis holds no
     session state of its own; the 409 NoActiveSession convention is Sarissa's, and Sarissa
     already refuses to export without an active session.
 - Returns: a JSON list of pre-filled writeup dicts, one per challenge, in file order:
-  `{"challenge_name": str, "ctf_name": str, "category": "", "difficulty": 0,
-    "tools_used": [], "approach": str, "flag": ""}`
+  `{"challenge_name": str, "ctf_name": str, "category": str, "difficulty": 0,
+    "tools_used": [], "approach": str, "flag": "", "time_spent_minutes": int}`
+  (`category` and `time_spent_minutes` added by P2-1 — see Field mapping.)
 - `challenges` empty → a list with one blank entry (`ctf_name` still filled from the session).
 - Unknown extra keys anywhere in the export are ignored.
 
@@ -150,10 +164,13 @@ pre-filled writeups. File-based only — the user picks the `.json` file Sarissa
 | `challenges[].name`   | `challenge_name` |
 | `session.name`        | `ctf_name` (same value on every entry) |
 | `challenges[].notes`  | `approach` (pre-fill — user edits before export) |
-| —                     | `category`, `difficulty`, `tools_used`, `flag` left blank |
+| `challenges[].category` | `category` — case-insensitive match against `CATEGORIES`, stored with canonical casing; no match → `""` (P2-1) |
+| `challenges[].challenge_time_seconds` | `time_spent_minutes` = `round(seconds / 60)`; bad/missing/negative → `0` (P2-1) |
+| —                     | `difficulty`, `tools_used`, `flag` left blank |
 
 `difficulty: 0` and `category: ""` are deliberately invalid for `WriteupSchema` — the user
 must choose them before export. The import never builds a `WriteupSchema`.
+Other Sarissa fields (`points`, `status`, `solved_at`, …) are ignored.
 
 ### Core module: `src/zapis/core/import_sarissa.py`
 - Pure function `parse_sarissa_export(data: dict) -> list[dict]` — no FastAPI import.
@@ -190,9 +207,10 @@ must choose them before export. The import never builds a `WriteupSchema`.
 - `test_import_sarissa_wrong_tool` → 422
 - `test_import_sarissa_malformed_json` → 422
 
-Minimum 7 new tests; the existing 32 stay green (39 total).
+Minimum 7 new tests for Phase 6. The existing suite stays green; see phase sections for minimum
+new test counts (absolute totals are not tracked here — they go stale).
 
-F01 contract tests (`tests/test_sarissa_contract.py`, 39 → 56): `SARISSA_1_3_EXPORT` fixture mirrors
+F01 contract tests (`tests/test_sarissa_contract.py`): `SARISSA_1_3_EXPORT` fixture mirrors
 Sarissa's `build_export()` (schema "1.3", tool "Sarissa"). `test_accepts_sarissa_1_3_export` plus
 known/unknown version, tool-case and still-rejected-tool cases. When Sarissa bumps its export schema,
 add the version to `SCHEMA_VERSIONS` and the fixture together.
@@ -213,7 +231,8 @@ add the version to `SCHEMA_VERSIONS` and the fixture together.
 - Never make external network calls
 - Never assume `pip install weasyprint` alone gives working PDF export — Pango/Cairo native libs are required (CI + PyInstaller)
 - Never use `git add -A` — path-scoped commits only
-- Never open PRs for Phase 1 — commit directly to main
+- Never bundle unrelated work: one PR per capability on a `claude/…` branch (R reviews and merges);
+  chore commits (docs, CLAUDE.md, metadata) go direct to main
 
 ## F04 — licence: MIT → Proprietary
 - LICENSE: all rights reserved, no reproduction/distribution without ShadowStrike's written permission
