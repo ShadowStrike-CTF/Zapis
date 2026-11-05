@@ -60,6 +60,11 @@ def test_accepts_sarissa_1_3_export(caplog):
     assert [e["challenge_name"] for e in result] == ["Lost USB", "Phish Tank"]
     assert {e["ctf_name"] for e in result} == {"DFIR-Cup-2026"}
     assert result[0]["approach"] == "Carved the FAT partition with photorec."
+    # P2-1: category is mapped and challenge_time_seconds becomes minutes (2940 s → 49 min).
+    assert result[0]["category"] == "Forensics"
+    assert result[0]["time_spent_minutes"] == 49
+    assert result[1]["category"] == ""
+    assert result[1]["time_spent_minutes"] == 0
     assert caplog.text == ""  # 1.3 is a known version — no warning
 
 

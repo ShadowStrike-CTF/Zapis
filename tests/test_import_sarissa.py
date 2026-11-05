@@ -44,6 +44,7 @@ def blank(challenge_name, ctf_name, approach):
         "tools_used": [],
         "approach": approach,
         "flag": "",
+        "time_spent_minutes": 0,  # P2-1: added to the import shape
     }
 
 

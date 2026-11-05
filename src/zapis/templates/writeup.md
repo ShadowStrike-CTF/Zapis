@@ -1,23 +1,2 @@
-# {{ challenge_name }}
-**CTF:** {{ ctf_name }}
-**Category:** {{ category }}
-**Difficulty:** {{ difficulty }}/3
-**Date:** {{ date }}
-**Author:** {{ author }}
-
----
-
-## Tools Used
-{% for tool in tools_used %}- {{ tool }}
-{% endfor %}
-
-## Approach
-{{ approach }}
-
-## Flag
-`{{ flag }}`
-
-{% if notes %}
-## Notes
-{{ notes }}
-{% endif %}
+{# © 2026 ShadowStrike. All rights reserved. — Aut Viam Inveniam Aut Faciam -#}
+{% include "_writeup_body.md" %}

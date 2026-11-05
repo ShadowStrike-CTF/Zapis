@@ -181,10 +181,12 @@ Other Sarissa fields (`points`, `status`, `solved_at`, …) are ignored.
 - "Import from Sarissa" button in the header → hidden `<input type="file" accept=".json">`.
 - File read client-side (`file.text()`), raw text POSTed to `/api/import/sarissa`; the
   server is the single validator (malformed JSON → 422 → shown inline).
-- On success: fills `challenge_name`, `ctf_name`, `approach`; clears `tools_used`, `flag`;
-  blanks the category and difficulty selects. `notes`, `author`, `date` are left as-is.
-- 2+ entries → a "Challenge" picker appears beside the button; choosing one refills the form
-  from that entry. Export buttons export whatever the form currently shows.
+- On success (Phase 2): imported challenges are added to the working set — they replace it only
+  when it holds a single blank entry. Each fills `challenge_name`, `ctf_name`, `approach`,
+  `category` (blank if unmatched), `time_spent_minutes`; `tools_used`, `flag` empty, difficulty
+  unchosen; `author`/`date` copied from the current entry, `notes` blank.
+- 2+ entries → a "Challenge" picker appears; switching writes the form back to the working set
+  first (P2-2 fix — edits are never lost). Export buttons export whatever the form currently shows.
 - All user data via `textContent` / `value` — never `innerHTML`. Errors shown inline in the
   header status (no browser dialogs). No green.
 - Client-side required check also covers category and difficulty (an imported form must
@@ -214,6 +216,81 @@ F01 contract tests (`tests/test_sarissa_contract.py`): `SARISSA_1_3_EXPORT` fixt
 Sarissa's `build_export()` (schema "1.3", tool "Sarissa"). `test_accepts_sarissa_1_3_export` plus
 known/unknown version, tool-case and still-rejected-tool cases. When Sarissa bumps its export schema,
 add the version to `SCHEMA_VERSIONS` and the fixture together.
+
+## Phase 2 — Working set, drafts, bundle export, code blocks (v1.4.0)
+P2-1 Sarissa mapping · P2-2 working set + drafts · P2-3 bundle export · P2-4 code blocks + safe MD.
+(P2-5 Windows onedir build is a separate task — needs a Windows host.)
+
+### Endpoints (handlers only call core; every core ValueError → 422 with a string `detail`)
+- `POST /api/draft/save` — body `{"writeups": [...], "active_index": n}` (`tool` optional; if present
+  it must be "zapis", any case). Returns the draft file as an attachment:
+  `<ctf-slug>.zapis.json` (common CTF name) or `draft.zapis.json`.
+- `POST /api/draft/load` — body: the draft file as-is. Returns `{"writeups": [...], "active_index": n}`,
+  every entry normalised. Unknown `draft_version` → warning on `zapis.draft`, loaded anyway.
+  `active_index` out of range → 0. Empty `writeups` → one blank entry.
+- Draft 422s: malformed JSON, body not an object, `tool` ≠ "zapis" (load: required), `writeups`
+  missing / not a list, any `writeups[]` entry not an object.
+- `POST /api/export/bundle/{fmt}` — fmt ∈ md, html, pdf, zip. Body `{"writeups": [...], "inner": "md"}`
+  (`inner` ∈ md/html/pdf, zip only). 422 detail names every failing entry:
+  `Writeup 2 (Phish Tank): difficulty must be 1, 2 or 3, got 0; Writeup 3 (...): ...`.
+  Download name `<ctf-slug>-writeups.<ext>` (or `writeups.<ext>` when CTF names differ).
+
+### Draft file
+`{"tool": "zapis", "draft_version": "1.0", "saved_at": "<ISO 8601 UTC, Z>", "active_index": 0,
+  "writeups": [{...every WriteupSchema field, all optional...}]}` — `DRAFT_VERSIONS` in `core/draft.py`.
+
+### Core modules
+- `core/schema.py` — `build_schema(fields) -> WriteupSchema`: the one validator (also re-exported
+  as `zapis.core.build_schema`). Blank date → today; `tools_used` must be list[str]; text fields must be str.
+- `core/draft.py` — `normalise_entry` (the one lenient entry: wrong type/missing → blank default,
+  category matched case-insensitively), `build_draft`, `draft_from_request`, `parse_draft`,
+  `DraftError(ValueError)`, `common_ctf_name`.
+- `core/bundle.py` — `export_bundle(entries, fmt, inner="md") -> bytes`, `bundle_filename`,
+  `BundleError(ValueError)` with `.messages`. Validates every entry before rendering anything.
+  Zip: one file per writeup (slug collisions → `-2`, `-3`) + `index.md`, built in `BytesIO`.
+  PDF: one `write_pdf()` per bundle (`exporters/pdf.py:html_to_pdf`).
+- `core/text.py` — `split_fences` (``` / ~~~, optional language tag, unclosed runs to end),
+  `md_inline_code` (CommonMark backtick-run rule), `md_line`, `slugify`.
+
+### Rendering
+- Templates: `writeup.{html,md}` are wrappers around `_writeup_body.{html,md}`; `_writeup_style.html`
+  is the shared `<style>`. `bundle.{html,md}`: title (common CTF name, else "CTF Writeups"),
+  contents, then each writeup via the partial (HTML/PDF: `break-before: page`).
+- `approach`/`notes` in HTML: prose → `<p class="prose">`, fences → `<pre><code class="lang">`,
+  autoescaped. Code-block CSS (`white-space: pre-wrap; word-break: break-all;
+  page-break-inside: auto`) is emitted only when there is code (keeps INV-P2-2).
+- Markdown: `md_line` on challenge_name, ctf_name, author, each tool; flag via
+  `md_inline_code(md_line(flag))`; approach/notes verbatim; no tools → `_None recorded._`.
+- "Time spent: N min" row only when `time_spent_minutes > 0`.
+
+### Frontend
+- Working set (`workingSet`, `activeIndex`) in memory only. New challenge / Remove challenge
+  (inline confirm, no dialog). Save draft / Open draft (`file.text()` → POST, same as import).
+- "Export all" (format select + zip inner select + button) appears with ≥ 2 entries; 422 detail
+  shown inline in the header status. "Time spent (min)" number input (min 0, step 1).
+
+### CLI
+- `zapis create ... --time-spent MINUTES` (int ≥ 0).
+- `zapis bundle DRAFT.zapis.json --format {md,html,pdf,zip} [--inner FMT] [-o PATH]` — reuses
+  `parse_draft()` + `export_bundle()`. Errors → stderr, exit 1, nothing written.
+
+### Phase 2 INVs
+- INV-P2-1: Stateless server — Zapis never stores writeup content (no server files, DB, localStorage).
+- INV-P2-2: Single-writeup MD/HTML for v1.3.2-valid input (no time spent, no fences, no backtick in
+  flag) is byte-identical to v1.3.2 — `tests/test_golden.py` + `tests/golden/`.
+  One decided exception: MD with an empty tools list renders `_None recorded._`.
+- INV-P2-3: User text is never trusted markup — autoescape on, no `|safe`, no `Markup()`.
+- INV-P2-4: One validator — `build_schema()` for every export path (single, bundle, CLI).
+  Import and draft-load never call it.
+- INV-P2-5: One `normalise_entry()` (core/draft.py), shared by import and draft-load.
+- INV-P2-6: No new runtime deps — stdlib `json`, `zipfile`, `io`, `re` only. WeasyPrint stays lazy:
+  imported only for pdf output (`bundle.py` only for fmt pdf or zip with inner pdf).
+
+### Tests (Phase 2: 148 new)
+`test_golden.py` (INV-P2-2), `test_text.py` (P2-4), `test_phase2_mapping.py` (P2-1),
+`test_draft.py` (P2-2), `test_bundle.py` (P2-3), `test_ui_static.py` (no HTML sinks, no dialogs,
+no green, no |safe, no new deps). Two pre-existing tests changed on purpose: the Phase 6 `blank()`
+helper gained `time_spent_minutes`; the F01 contract test now expects `"Lost USB"` → `Forensics`, 49 min.
 
 ## Testing Standard
 - All tests in `tests/`

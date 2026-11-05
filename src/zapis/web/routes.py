@@ -1,17 +1,32 @@
 # © 2026 ShadowStrike. All rights reserved.
 # Aut Viam Inveniam Aut Faciam
-"""FastAPI route handlers — call core exporters, never export directly (INV-4)."""
+"""FastAPI route handlers — call core exporters, never export directly (INV-4).
+
+Handlers only translate: request → core call → response, and core ValueErrors → 422.
+No validation or mapping lives here (INV-1).
+"""
 from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
+from zapis.core import build_schema
+from zapis.core.bundle import BundleError, bundle_filename, bundle_media_type, export_bundle
+from zapis.core.draft import DraftError, draft_filename, draft_from_request, dump_draft, parse_draft
 from zapis.core.export import export, filename_for, media_type
 from zapis.core.import_sarissa import SarissaImportError, parse_sarissa_export
-from zapis.core.schema import CATEGORIES, WriteupSchema
+from zapis.core.schema import CATEGORIES
 
 router = APIRouter()
+
+
+def _attachment(content: bytes, media: str, filename: str) -> Response:
+    return Response(
+        content,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/", include_in_schema=False)
@@ -30,29 +45,45 @@ def categories() -> list[str]:
     return list(CATEGORIES)
 
 
-def _build_schema(body: dict[str, Any]) -> WriteupSchema:
-    fields = dict(body)
-    if not fields.get("date"):
-        fields.pop("date", None)
-    tools = fields.get("tools_used")
-    if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
-        raise HTTPException(422, "tools_used must be a list of strings")
-    try:
-        return WriteupSchema(**fields)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
 @router.post("/api/export/{fmt}")
 def export_writeup(
     fmt: Literal["md", "html", "pdf"], body: dict[str, Any] = Body(...)
 ) -> Response:
-    schema = _build_schema(body)
-    return Response(
-        export(schema, fmt),
-        media_type=media_type(fmt),
-        headers={"Content-Disposition": f'attachment; filename="{filename_for(schema, fmt)}"'},
-    )
+    try:
+        schema = build_schema(body)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _attachment(export(schema, fmt), media_type(fmt), filename_for(schema, fmt))
+
+
+@router.post("/api/export/bundle/{fmt}")
+def export_bundle_route(
+    fmt: Literal["md", "html", "pdf", "zip"], body: dict[str, Any] = Body(...)
+) -> Response:
+    entries = body.get("writeups")
+    try:
+        content = export_bundle(entries, fmt, body.get("inner", "md"))
+    except BundleError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _attachment(content, bundle_media_type(fmt), bundle_filename(entries, fmt))
+
+
+@router.post("/api/draft/save")
+def draft_save(body: dict[str, Any] = Body(...)) -> Response:
+    try:
+        draft = draft_from_request(body)
+    except DraftError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _attachment(dump_draft(draft), "application/json", draft_filename(draft))
+
+
+@router.post("/api/draft/load")
+def draft_load(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        entries, active_index = parse_draft(body)
+    except DraftError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"writeups": entries, "active_index": active_index}
 
 
 @router.post("/api/import/sarissa")

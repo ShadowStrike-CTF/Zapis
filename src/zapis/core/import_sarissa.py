@@ -6,32 +6,40 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from zapis.core.draft import normalise_entry
+
 log = logging.getLogger("zapis.import_sarissa")
 
 # Sarissa export schema versions Zapis knows. Any other version is imported with a warning, not rejected.
 SCHEMA_VERSIONS = ("1.0", "1.3")
 TOOL = "sarissa"  # compared case-insensitively — Sarissa emits "Sarissa"
 
+# The keys an imported entry carries. notes/author/date are not part of an import — the UI keeps its own.
+IMPORT_KEYS = ("challenge_name", "ctf_name", "category", "difficulty", "tools_used",
+               "approach", "flag", "time_spent_minutes")
+
 
 class SarissaImportError(ValueError):
     """The supplied data is not a usable Sarissa export."""
 
 
-def _text(value: Any) -> str:
-    return value if isinstance(value, str) else ""
+def _minutes(seconds: Any) -> int:
+    # Sarissa 1.3 `challenge_time_seconds`: non-negative whole seconds → whole minutes, else 0.
+    if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds < 0:
+        return 0
+    return round(seconds / 60)
 
 
-def _entry(challenge_name: str, ctf_name: str, approach: str) -> dict[str, Any]:
-    # category/difficulty/tools_used/flag are left blank — the user fills them before export.
-    return {
-        "challenge_name": challenge_name,
+def _entry(challenge: dict[str, Any], ctf_name: str) -> dict[str, Any]:
+    # difficulty/tools_used/flag are left blank — the user fills them before export.
+    entry = normalise_entry({
+        "challenge_name": challenge.get("name"),
         "ctf_name": ctf_name,
-        "category": "",
-        "difficulty": 0,
-        "tools_used": [],
-        "approach": approach,
-        "flag": "",
-    }
+        "category": challenge.get("category"),  # case-insensitive → canonical, else ""
+        "approach": challenge.get("notes"),
+        "time_spent_minutes": _minutes(challenge.get("challenge_time_seconds")),
+    })
+    return {key: entry[key] for key in IMPORT_KEYS}
 
 
 def parse_sarissa_export(data: dict) -> list[dict]:
@@ -50,13 +58,13 @@ def parse_sarissa_export(data: dict) -> list[dict]:
         raise SarissaImportError("challenges must be a list")
 
     session = data.get("session")
-    ctf_name = _text(session.get("name")) if isinstance(session, dict) else ""
+    ctf_name = session.get("name") if isinstance(session, dict) else ""
 
     if not challenges:
-        return [_entry("", ctf_name, "")]
+        return [_entry({}, ctf_name)]
     entries = []
     for i, challenge in enumerate(challenges):
         if not isinstance(challenge, dict):
             raise SarissaImportError(f"challenges[{i}] must be an object")
-        entries.append(_entry(_text(challenge.get("name")), ctf_name, _text(challenge.get("notes"))))
+        entries.append(_entry(challenge, ctf_name))
     return entries
