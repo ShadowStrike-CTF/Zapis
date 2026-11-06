@@ -72,9 +72,11 @@ def test_import_time_spent_missing():
 
 
 def test_import_still_ignores_other_sarissa_fields():
+    # Ph3: solved_at now maps to date ("x" is not a date → ""); points/status/id stay unmapped.
     entry = export_with({"points": 300, "status": "solved", "solved_at": "x", "id": "abc"})
     assert set(entry) == {"challenge_name", "ctf_name", "category", "difficulty", "tools_used",
-                          "approach", "flag", "time_spent_minutes"}
+                          "approach", "flag", "time_spent_minutes", "date"}
+    assert entry["date"] == ""
 
 
 # --- Schema ------------------------------------------------------------------------

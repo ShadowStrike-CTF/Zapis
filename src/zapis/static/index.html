@@ -542,8 +542,10 @@
       var keep = workingSet.length === 1 && isEmpty(workingSet[0]) ? [] : workingSet;
       var base = workingSet[activeIndex];
       var added = entries.map(function (e) {
-        var entry = { notes: "", author: base.author || "ShadowStrike", date: base.date || todayISO() };
+        var entry = { notes: "", author: base.author || "ShadowStrike" };
         FIELDS.forEach(function (f) { if (f in e) { entry[f] = e[f]; } });
+        // Solved challenges carry their solve date; unsolved ones ("") keep the current date.
+        entry.date = e.date || base.date || todayISO();
         return entry;
       });
       replaceSet(keep.concat(added), keep.length);

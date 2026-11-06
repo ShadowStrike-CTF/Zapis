@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zapis"
-version = "1.4.0"
+version = "1.5.0"
 description = "CTF writeup templating and export tool. by ShadowStrike."
 readme = "README.md"
 license = {text = "Proprietary"}
@@ -32,6 +32,8 @@ classifiers = [
 
 [project.optional-dependencies]
 test = ["pytest>=8", "httpx2>=2.0"]
+# Ph3 browser e2e (tests/test_e2e_import.py) — test-only, never a runtime dependency (INV-P3-4).
+e2e = ["playwright>=1.40"]
 
 [project.scripts]
 zapis = "zapis.cli:main"
