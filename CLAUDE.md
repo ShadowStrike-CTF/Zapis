@@ -292,6 +292,45 @@ P2-1 Sarissa mapping · P2-2 working set + drafts · P2-3 bundle export · P2-4 
 no green, no |safe, no new deps). Two pre-existing tests changed on purpose: the Phase 6 `blank()`
 helper gained `time_spent_minutes`; the F01 contract test now expects `"Lost USB"` → `Forensics`, 49 min.
 
+## Phase 3 — Sarissa import integration (v1.5.0)
+End-to-end test of the Sarissa → Zapis pipeline, plus the `solved_at` → `date` mapping.
+Status: planned (M/1.1.14). Build lands on branch `claude/zapis-phase-3-sarissa-xyb8kq`.
+
+### Decisions (locked by R)
+- `solved_at` → `date`: **adopted (Option A).** A string that starts `YYYY-MM-DD` and parses as a real
+  date (`re` + `datetime.date.fromisoformat`) → that date. Null, missing, non-string or unparsable → `""`.
+  A bare `[:10]` slice is not enough: Python 3.11 `fromisoformat` also accepts week dates (`2026-W43-6`).
+  It is the UTC date part, so a late-night local solve can show the next day.
+- The UI keeps the current entry's date when an imported `date` is blank
+  (`entry.date = e.date || base.date || todayISO()`). Solved challenges get their solve date.
+- Additive merge testing: a Playwright browser test. `playwright` is a test-only `[e2e]` extra.
+
+### Mapping as of Ph3
+| Sarissa export | Zapis writeup |
+|---|---|
+| `challenges[].name` | `challenge_name` |
+| `session.name` | `ctf_name` |
+| `challenges[].notes` | `approach` (unchanged) |
+| `challenges[].category` | `category` (case-insensitive, else `""`) |
+| `challenges[].challenge_time_seconds` | `time_spent_minutes` (`round(s/60)`, bad → 0) |
+| `challenges[].solved_at` | `date` (`YYYY-MM-DD`, else `""`) — **new in Ph3** |
+| `id`, `points`, `status`, `created_at` | not mapped |
+
+`IMPORT_KEYS` (Ph3): `challenge_name, ctf_name, category, difficulty, tools_used, approach, flag,
+time_spent_minutes, date`. `notes` and `author` still come from the UI's current entry.
+
+### Reference fixture
+`tests/fixtures/sarissa_1_3_export.json` is the single Sarissa 1.3 reference export, used by the
+contract tests, the e2e tests and the G.0 smoke curl.
+
+### Phase 3 INVs
+- INV-P3-1: `normalise_entry()` stays the only lenient-entry path; import adds inputs, not a normaliser.
+- INV-P3-2: `points`, `status`, `id`, `created_at` stay unmapped. `notes` → `approach` unchanged.
+- INV-P3-3: The additive merge stays client-side. The server never sees or stores the working set.
+- INV-P3-4: `playwright` is test-only (`[e2e]`); runtime deps unchanged.
+- INV-P3-5: `tests/fixtures/sarissa_1_3_export.json` is the single reference fixture. A Sarissa schema
+  bump updates it together with `SCHEMA_VERSIONS`.
+
 ## Testing Standard
 - All tests in `tests/`
 - pytest with `[test]` extras in pyproject.toml
