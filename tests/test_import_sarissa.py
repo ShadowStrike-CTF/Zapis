@@ -45,6 +45,7 @@ def blank(challenge_name, ctf_name, approach):
         "approach": approach,
         "flag": "",
         "time_spent_minutes": 0,  # P2-1: added to the import shape
+        "date": "",  # Ph3: solved_at → date; these exports have no solved_at
     }
 
 

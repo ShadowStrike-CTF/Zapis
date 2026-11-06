@@ -72,6 +72,9 @@ src/zapis/
     bundle.md          # multi-writeup bundle in Markdown (Phase 2)
   static/
     index.html         # single-page form UI
+tests/
+  fixtures/
+    sarissa_1_3_export.json  # the single Sarissa 1.3 reference export (Phase 3, INV-P3-5)
 ```
 
 ## Writeup Schema (core fields)
@@ -153,8 +156,8 @@ pre-filled writeups. File-based only — the user picks the `.json` file Sarissa
     already refuses to export without an active session.
 - Returns: a JSON list of pre-filled writeup dicts, one per challenge, in file order:
   `{"challenge_name": str, "ctf_name": str, "category": str, "difficulty": 0,
-    "tools_used": [], "approach": str, "flag": "", "time_spent_minutes": int}`
-  (`category` and `time_spent_minutes` added by P2-1 — see Field mapping.)
+    "tools_used": [], "approach": str, "flag": "", "time_spent_minutes": int, "date": str}`
+  (`category` and `time_spent_minutes` added by P2-1; `date` added by Ph3 — see Field mapping.)
 - `challenges` empty → a list with one blank entry (`ctf_name` still filled from the session).
 - Unknown extra keys anywhere in the export are ignored.
 
@@ -166,11 +169,12 @@ pre-filled writeups. File-based only — the user picks the `.json` file Sarissa
 | `challenges[].notes`  | `approach` (pre-fill — user edits before export) |
 | `challenges[].category` | `category` — case-insensitive match against `CATEGORIES`, stored with canonical casing; no match → `""` (P2-1) |
 | `challenges[].challenge_time_seconds` | `time_spent_minutes` = `round(seconds / 60)`; bad/missing/negative → `0` (P2-1) |
+| `challenges[].solved_at` | `date` = its `YYYY-MM-DD` part; null/missing/unparsable → `""` (Ph3) |
 | —                     | `difficulty`, `tools_used`, `flag` left blank |
 
 `difficulty: 0` and `category: ""` are deliberately invalid for `WriteupSchema` — the user
 must choose them before export. The import never builds a `WriteupSchema`.
-Other Sarissa fields (`points`, `status`, `solved_at`, …) are ignored.
+Other Sarissa fields (`id`, `points`, `status`, `created_at`, …) are ignored.
 
 ### Core module: `src/zapis/core/import_sarissa.py`
 - Pure function `parse_sarissa_export(data: dict) -> list[dict]` — no FastAPI import.
@@ -184,7 +188,8 @@ Other Sarissa fields (`points`, `status`, `solved_at`, …) are ignored.
 - On success (Phase 2): imported challenges are added to the working set — they replace it only
   when it holds a single blank entry. Each fills `challenge_name`, `ctf_name`, `approach`,
   `category` (blank if unmatched), `time_spent_minutes`; `tools_used`, `flag` empty, difficulty
-  unchosen; `author`/`date` copied from the current entry, `notes` blank.
+  unchosen; `author` copied from the current entry, `notes` blank. `date` (Ph3) = the solve date
+  when the import carries one, else copied from the current entry.
 - 2+ entries → a "Challenge" picker appears; switching writes the form back to the working set
   first (P2-2 fix — edits are never lost). Export buttons export whatever the form currently shows.
 - All user data via `textContent` / `value` — never `innerHTML`. Errors shown inline in the
@@ -294,7 +299,7 @@ helper gained `time_spent_minutes`; the F01 contract test now expects `"Lost USB
 
 ## Phase 3 — Sarissa import integration (v1.5.0)
 End-to-end test of the Sarissa → Zapis pipeline, plus the `solved_at` → `date` mapping.
-Status: planned (M/1.1.14). Build lands on branch `claude/zapis-phase-3-sarissa-xyb8kq`.
+M/1.1.14. Built on branch `claude/zapis-phase-3-sarissa-xyb8kq`. Version 1.4.0 → 1.5.0.
 
 ### Decisions (locked by R)
 - `solved_at` → `date`: **adopted (Option A).** A string that starts `YYYY-MM-DD` and parses as a real
@@ -330,6 +335,23 @@ contract tests, the e2e tests and the G.0 smoke curl.
 - INV-P3-4: `playwright` is test-only (`[e2e]`); runtime deps unchanged.
 - INV-P3-5: `tests/fixtures/sarissa_1_3_export.json` is the single reference fixture. A Sarissa schema
   bump updates it together with `SCHEMA_VERSIONS`.
+
+### Tests (Phase 3: 20 new)
+- `tests/test_sarissa_contract.py` (+17): loads the fixture file; whole-entry equality on both
+  challenges (core + route), keys == `IMPORT_KEYS` with `id`/`points`/`status`/`created_at`/`solved_at`
+  absent, `test_solved_challenge_gets_date_unsolved_leaves_blank`, a 13-case `solved_at` parametrize,
+  and `test_route_is_stateless_between_imports` (the server keeps no working set).
+- `tests/test_e2e_import.py` (+3, Playwright): import into a blank set (replaces it), into a non-empty
+  set (adds; hand-typed entry intact), and two imports in a row (both add; earlier edits survive).
+- Two pre-existing tests changed on purpose (caused by `date` joining the import shape): the Phase 6
+  `blank()` helper gained `"date": ""`; P2-1's `test_import_still_ignores_other_sarissa_fields`
+  expects `date` in the key set.
+
+### Running the e2e tests
+- `pip install -e ".[test,e2e]"` then `python -m playwright install chromium` (or point
+  `ZAPIS_E2E_CHROMIUM` at an existing Chromium binary).
+- Without playwright or a browser, the 3 e2e tests skip. `ZAPIS_E2E_REQUIRED=1` makes a missing
+  browser a failure instead; CI sets it and runs `playwright install --with-deps chromium`.
 
 ## Testing Standard
 - All tests in `tests/`

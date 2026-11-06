@@ -3,7 +3,9 @@
 """Sarissa export JSON (schema v1.0 / v1.3) → pre-filled writeup dicts. File-based only — never calls Sarissa."""
 from __future__ import annotations
 
+import datetime
 import logging
+import re
 from typing import Any
 
 from zapis.core.draft import normalise_entry
@@ -14,9 +16,12 @@ log = logging.getLogger("zapis.import_sarissa")
 SCHEMA_VERSIONS = ("1.0", "1.3")
 TOOL = "sarissa"  # compared case-insensitively — Sarissa emits "Sarissa"
 
-# The keys an imported entry carries. notes/author/date are not part of an import — the UI keeps its own.
+# The keys an imported entry carries. notes/author are not part of an import — the UI keeps its own.
+# date comes from solved_at (Ph3); "" when unsolved, and the UI then keeps its current date.
 IMPORT_KEYS = ("challenge_name", "ctf_name", "category", "difficulty", "tools_used",
-               "approach", "flag", "time_spent_minutes")
+               "approach", "flag", "time_spent_minutes", "date")
+
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 class SarissaImportError(ValueError):
@@ -30,6 +35,17 @@ def _minutes(seconds: Any) -> int:
     return round(seconds / 60)
 
 
+def _solved_date(solved_at: Any) -> str:
+    # Sarissa `solved_at` (ISO 8601, or null while unsolved) → its YYYY-MM-DD date part, else "".
+    # The regex comes first: fromisoformat alone would also accept week dates like "2026-W43-6".
+    if not isinstance(solved_at, str) or not _ISO_DATE.match(solved_at):
+        return ""
+    try:
+        return datetime.date.fromisoformat(solved_at[:10]).isoformat()
+    except ValueError:
+        return ""
+
+
 def _entry(challenge: dict[str, Any], ctf_name: str) -> dict[str, Any]:
     # difficulty/tools_used/flag are left blank — the user fills them before export.
     entry = normalise_entry({
@@ -38,6 +54,7 @@ def _entry(challenge: dict[str, Any], ctf_name: str) -> dict[str, Any]:
         "category": challenge.get("category"),  # case-insensitive → canonical, else ""
         "approach": challenge.get("notes"),
         "time_spent_minutes": _minutes(challenge.get("challenge_time_seconds")),
+        "date": _solved_date(challenge.get("solved_at")),
     })
     return {key: entry[key] for key in IMPORT_KEYS}
 
