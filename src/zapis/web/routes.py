@@ -9,13 +9,14 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from zapis.core import build_schema
 from zapis.core.bundle import BundleError, bundle_filename, bundle_media_type, export_bundle
 from zapis.core.draft import DraftError, draft_filename, draft_from_request, dump_draft, parse_draft
 from zapis.core.export import export, filename_for, media_type
 from zapis.core.import_sarissa import SarissaImportError, parse_sarissa_export
+from zapis.core.sarissa_client import SarissaUnavailableError, fetch_sarissa_manifest, parse_manifest
 from zapis.core.schema import CATEGORIES
 
 router = APIRouter()
@@ -92,3 +93,12 @@ def import_sarissa(body: dict[str, Any] = Body(...)) -> list[dict[str, Any]]:
         return parse_sarissa_export(body)
     except SarissaImportError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/api/import/sarissa/live")
+def import_sarissa_live() -> Response:
+    # Ph6-Live (INV-P6-2-EX1): Sarissa not running is an expected 503, never an unhandled error.
+    try:
+        return JSONResponse(parse_manifest(fetch_sarissa_manifest()))
+    except SarissaUnavailableError as exc:
+        return JSONResponse({"error": "sarissa_unreachable", "detail": str(exc)}, status_code=503)
