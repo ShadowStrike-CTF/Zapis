@@ -51,6 +51,7 @@ src/zapis/
     export.py          # format dispatch shared by web + CLI: schema → (bytes, media type, filename)
     schema.py          # WriteupSchema dataclass — single source of truth for form fields
     import_sarissa.py  # Sarissa export JSON → pre-filled writeup dicts (Phase 6)
+    sarissa_client.py  # live GET 127.0.0.1:7331/api/manifest → challenge list (Ph6-Live)
     text.py            # fence parser (split_fences) + Markdown escape helpers (Phase 2)
     draft.py           # draft file build/parse + normalise_entry (Phase 2)
     bundle.py          # multi-writeup bundle export: md / html / pdf / zip (Phase 2)
@@ -352,6 +353,50 @@ contract tests, the e2e tests and the G.0 smoke curl.
   `ZAPIS_E2E_CHROMIUM` at an existing Chromium binary).
 - Without playwright or a browser, the 3 e2e tests skip. `ZAPIS_E2E_REQUIRED=1` makes a missing
   browser a failure instead; CI sets it and runs `playwright install --with-deps chromium`.
+
+## Ph6-Live — Sarissa live manifest ingestion (v1.6.0)
+
+Route: GET /api/import/sarissa/live
+INV-P6-2-EX1: GET http://127.0.0.1:7331/api/manifest authorized.
+127.0.0.1 only, timeout ≤ 2s, graceful error when unreachable.
+Existing POST /api/import/sarissa (file import) untouched.
+Status values expected from Sarissa: "in_progress" / "solved".
+No flag_hash field in Sarissa manifest.
+
+M/1.1.16. Branch `claude/zapis-phase-6-sarissa-ingestion`. Version 1.5.0 → 1.6.0. A new feature next to the
+Phase 6 file import — the Phase 6 section above is not changed by it. Backend only (no UI yet).
+
+### Sarissa manifest (input)
+`{"challenges": [{"id": str, "name": str, "status": "in_progress"|"solved"}], "total": int,
+  "manifest_hash": "sha256:<hex>"}`
+
+### Core module: `src/zapis/core/sarissa_client.py` (stdlib `urllib.request` + `json` only)
+- `SARISSA_HOST = "127.0.0.1"`, `SARISSA_PORT = 7331` — the only place 7331 appears in `src/`
+  (a test enforces it). `TIMEOUT = 2.0`, `MAX_BYTES = 1_000_000`.
+- `fetch_sarissa_manifest(host=SARISSA_HOST, port=SARISSA_PORT, timeout=TIMEOUT) -> dict` —
+  `host` other than `127.0.0.1` or `timeout` outside (0, 2] → `ValueError`. Proxy env vars are ignored
+  (`ProxyHandler({})`) and redirects are refused, so the call can never leave loopback.
+  Connection error, timeout, non-200, oversized body, bad UTF-8/JSON, non-object → `SarissaUnavailableError`.
+- `parse_manifest(data) -> list[dict]` — `challenges` must be a list of objects with string `id`, `name` and
+  `status`; returns `[{"id", "name", "status"}]`. Unknown `status` string → warning on `zapis.sarissa_client`,
+  kept as-is. `total`, `manifest_hash` and extra keys are ignored. Bad shape → `SarissaUnavailableError`.
+
+### Endpoint: `GET /api/import/sarissa/live`
+- 200 → JSON list of `{"id", "name", "status"}` in manifest order.
+- Any `SarissaUnavailableError` → **503** `{"error": "sarissa_unreachable", "detail": "<reason>"}` —
+  never an unhandled exception. 503 is the expected answer whenever Sarissa is not running.
+- The handler only calls core (INV-1, INV-4).
+
+### Ph6-Live INVs
+- INV-P6-2-EX1: the single authorized live call (above). INV-P6-1 / INV-P6-2 hold for everything else.
+- INV-P6L-1: No new runtime dependencies — stdlib only.
+- INV-P6L-2: Stateless — the manifest is fetched per request and never stored (INV-P2-1).
+
+### Tests (`tests/test_sarissa_live.py`)
+Route tests monkeypatch `fetch_sarissa_manifest`; client tests run against a stub stdlib `http.server`
+on 127.0.0.1 with an ephemeral port (Sarissa is never needed). Covers success, unreachable, non-200,
+malformed JSON, bad shape, redirect refused, timeout, proxy env ignored, host/timeout guards,
+single-7331 check, and no regression on `POST /api/import/sarissa`.
 
 ## Testing Standard
 - All tests in `tests/`
