@@ -21,7 +21,7 @@ SARISSA_PORT = 7331  # single source of truth for Sarissa's port in Zapis
 MANIFEST_PATH = "/api/manifest"
 TIMEOUT = 2.0
 MAX_BYTES = 1_000_000
-STATUSES = ("in_progress", "solved")
+STATUSES = ("unsolved", "in_progress", "solved")
 
 
 class SarissaUnavailableError(Exception):

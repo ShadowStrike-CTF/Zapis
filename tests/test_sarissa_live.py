@@ -268,6 +268,18 @@ def test_unknown_status_warns_and_is_kept(caplog):
     assert "abandoned" in caplog.text
 
 
+def test_statuses_match_sarissa_enum():
+    assert sarissa_client.STATUSES == ("unsolved", "in_progress", "solved")
+
+
+@pytest.mark.parametrize("status", ["unsolved", "in_progress", "solved"])
+def test_known_status_parsed_without_warning(status, caplog):
+    with caplog.at_level("WARNING", logger="zapis.sarissa_client"):
+        out = parse_manifest({"challenges": [{"id": "x", "name": "N", "status": status}]})
+    assert out == [{"id": "x", "name": "N", "status": status}]
+    assert "Unknown Sarissa challenge status" not in caplog.text
+
+
 def test_port_7331_defined_once_in_src():
     hits = [
         (p.relative_to(ROOT), line)
