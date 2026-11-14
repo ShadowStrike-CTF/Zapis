@@ -43,3 +43,6 @@ zapis = "zapis.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/zapis"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["TEMPLATE_GUIDE.md", "CLAUDE.md", "CLAUDE.local.md"]
